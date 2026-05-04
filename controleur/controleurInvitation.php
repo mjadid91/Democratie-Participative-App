@@ -1,127 +1,76 @@
 <?php
 
-require_once("modele/invitation.php");
+require_once "models/Utilisateur.php";
+require_once "models/Invitation.php";
+require_once "models/RoleDansGroupe.php";
 
-class controleurInvitation {
-
-
-    public static function ajouterMembre() {
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            try {
-                $IDGroupe = intval($_POST['IDGroupe']);
-                $loginUtilisateur = htmlspecialchars(trim($_POST['loginUtilisateur']));
-
-                if (empty($loginUtilisateur) || $IDGroupe <= 0) {
-                    throw new Exception("Les données fournies sont invalides.");
-                }
-
-                // Vérifier si l'utilisateur existe
-                if (!utilisateur::utilisateurExiste($loginUtilisateur)) {
-                    $_SESSION['msgErreurAjout'] = "Erreur : L'utilisateur n'existe pas.";
-                    header("Location: routeur.php?page=propositions&action=afficherPropositions&IDGroupe=$IDGroupe");
-                    exit();
-                }
-
-                // Vérifier si l'utilisateur est déjà membre du groupe
-                $sql = "SELECT COUNT(*) FROM role_dans_groupe WHERE loginUtilisateur = :loginUtilisateur AND IDGroupe = :IDGroupe";
-                $stmt = Connexion::pdo()->prepare($sql);
-                $stmt->execute([':loginUtilisateur' => $loginUtilisateur, ':IDGroupe' => $IDGroupe]);
-                $estDejaMembre = $stmt->fetchColumn();
-
-                if ($estDejaMembre > 0) {
-                    $_SESSION['msgErreurAjout'] = "Erreur : L'utilisateur est déjà membre de ce groupe.";
-                    header("Location: routeur.php?page=propositions&action=afficherPropositions&IDGroupe=$IDGroupe");
-                    exit();
-                }
-
-                // Ajouter l'utilisateur au groupe
-                $resultat = utilisateur::ajouterMembreAuGroupe($IDGroupe, $loginUtilisateur);
-
-                if ($resultat) {
-                    $_SESSION['msgAjoutMembre'] = "Le membre a été ajouté avec succès.";
-                } else {
-                    $_SESSION['msgErreurAjout'] = "Erreur : L'utilisateur n'a pas pu être ajouté au groupe.";
-                }
-
-                header("Location: routeur.php?page=propositions&action=afficherPropositions&IDGroupe=$IDGroupe");
-                exit();
-            } catch (Exception $e) {
-                $_SESSION['msgErreurAjout'] = "Erreur : " . $e->getMessage();
-                header("Location: routeur.php?page=propositions&action=afficherPropositions&IDGroupe=$IDGroupe");
-                exit();
-            }
-        }
-    }
-
-    public static function supprimerMembre() {
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            try {
-                $IDGroupe = intval($_POST['IDGroupe']);
-                $loginUtilisateur = htmlspecialchars(trim($_POST['loginUtilisateur']));
-
-                if (empty($loginUtilisateur) || $IDGroupe <= 0) {
-                    throw new Exception("Les données fournies sont invalides.");
-                }
-
-                // Vérifiez si l'utilisateur est membre du groupe
-                if (!utilisateur::estMembreDuGroupe($IDGroupe, $loginUtilisateur)) {
-                    $_SESSION['msgErreurSuppression'] = "Erreur : L'utilisateur n'est pas membre de ce groupe.";
-                    header("Location: routeur.php?page=propositions&action=afficherPropositions&IDGroupe=$IDGroupe");
-                    exit();
-                }
-
-                // Supprimer le membre
-                $resultat = utilisateur::supprimerMembreDuGroupe($IDGroupe, $loginUtilisateur);
-
-                if ($resultat) {
-                    $_SESSION['msgSuppressionMembre'] = "Le membre a été supprimé avec succès.";
-                } else {
-                    $_SESSION['msgErreurSuppression'] = "Erreur : Impossible de supprimer l'utilisateur.";
-                }
-
-                header("Location: routeur.php?page=propositions&action=afficherPropositions&IDGroupe=$IDGroupe");
-                exit();
-            } catch (Exception $e) {
-                $_SESSION['msgErreurSuppression'] = "Erreur : " . $e->getMessage();
-                header("Location: routeur.php?page=propositions&action=afficherPropositions&IDGroupe=$IDGroupe");
-                exit();
-            }
-        }
-    }
-
-    // Méthode pour traiter une invitation
-    public static function accepterInvitation() {
-        if (!isset($_GET['IDInvitation'])) {
-            echo "<p class='alert alert-danger'>Erreur : ID de l'invitation manquant.</p>";
-            return;
+class ControleurInvitation
+{
+    public static function inviter(): void
+    {
+        if (!Utilisateur::isConnected()) {
+            header("Location: routeur.php?page=connexion");
+            exit;
         }
 
-        $IDInvitation = intval($_GET['IDInvitation']);
+        $user = Utilisateur::current();
 
-        try {
-            // Vérifier si l'invitation existe
-            $invitation = invitation::getInvitationById($IDInvitation);
+        $idGroupe = (int) ($_POST['id_groupe'] ?? 0);
+        $email = trim($_POST['email_invite'] ?? '');
 
-            if ($invitation && $invitation['statutInvitation'] === 'En attente') {
-                // Marquer l'invitation comme acceptée
-                invitation::updateStatutInvitation($IDInvitation, 'Acceptée');
-
-                echo "<p class='alert alert-success'>Invitation acceptée pour l'email {$invitation['emailInvite']}.</p>";
-            } else {
-                echo "<p class='alert alert-warning'>Invitation introuvable ou déjà traitée.</p>";
-            }
-        } catch (Exception $e) {
-            echo "<p class='alert alert-danger'>Erreur lors du traitement de l'invitation : {$e->getMessage()}</p>";
+        if ($idGroupe <= 0 || $email === '') {
+            $_SESSION['erreur'] = "Invitation invalide.";
+            header("Location: routeur.php?page=groupes");
+            exit;
         }
+
+        if (!RoleDansGroupe::hasRole((int) $user['id_utilisateur'], $idGroupe, 'Administrateur')) {
+            $_SESSION['erreur'] = "Vous n'avez pas les droits pour inviter.";
+            header("Location: routeur.php?page=propositions&id_groupe=$idGroupe");
+            exit;
+        }
+
+        $idInvitation = Invitation::create($idGroupe, (int) $user['id_utilisateur'], $email);
+
+        $_SESSION[$idInvitation ? 'success' : 'erreur'] =
+            $idInvitation ? "Invitation créée." : "Email invalide ou invitation impossible.";
+
+        header("Location: routeur.php?page=propositions&id_groupe=$idGroupe");
+        exit;
     }
 
-    // Générer et afficher un lien d'acceptation en local
-    public static function afficherLienInvitation($IDInvitation, $emailInvite, $IDGroupe) {
-        $lienAcceptation = "http://localhost/votre-projet/routeur.php?page=invitation&action=accepter&IDInvitation=$IDInvitation";
-        echo "<p>Invitation envoyée à : $emailInvite</p>";
-        echo "<p>Lien d'acceptation (test en local) : <a href=\"$lienAcceptation\" target=\"_blank\">$lienAcceptation</a></p>";
+    public static function accepter(): void
+    {
+        if (!Utilisateur::isConnected()) {
+            header("Location: routeur.php?page=connexion");
+            exit;
+        }
+
+        $user = Utilisateur::current();
+        $idInvitation = (int) ($_GET['id_invitation'] ?? 0);
+        $invitation = Invitation::getById($idInvitation);
+
+        if (!$invitation || $invitation['statut'] !== 'en_attente') {
+            $_SESSION['erreur'] = "Invitation invalide ou déjà traitée.";
+            header("Location: routeur.php?page=groupes");
+            exit;
+        }
+
+        Invitation::updateStatut($idInvitation, 'acceptee');
+        RoleDansGroupe::addRole((int) $user['id_utilisateur'], (int) $invitation['id_groupe'], 2);
+
+        $_SESSION['success'] = "Invitation acceptée.";
+        header("Location: routeur.php?page=groupes");
+        exit;
     }
 
+    public static function refuser(): void
+    {
+        $idInvitation = (int) ($_GET['id_invitation'] ?? 0);
+        Invitation::updateStatut($idInvitation, 'refusee');
 
+        $_SESSION['success'] = "Invitation refusée.";
+        header("Location: routeur.php?page=groupes");
+        exit;
+    }
 }
-?>

@@ -1,34 +1,35 @@
 <?php
-class Connexion {
-    // Les attributs static caractéristiques de la connexion
-    static private $hostname = 'localhost';
-    static private $database = 'projets3';
-    static private $login = 'root';
-    static private $password = '';
 
-    static private $tabUTF8 = array(PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8");
+require_once __DIR__ . "/Config.php";
 
-    // L'attribut static qui matérialisera la connexion
-    static private $pdo;
+class Connexion
+{
+    private static ?PDO $pdo = null;
 
-    // Le getter public de cet attribut
-    static public function pdo() {
+    public static function pdo(): PDO
+    {
+        if (self::$pdo === null) {
+            self::connect();
+        }
+
         return self::$pdo;
     }
 
-    // La fonction static de connexion qui initialise $pdo et lance la tentative de connexion
-    static public function connect() {
-        $h = self::$hostname;
-        $d = self::$database;
-        $l = self::$login;
-        $p = self::$password;
-        $t = self::$tabUTF8;
+    public static function connect(): void
+    {
         try {
-            self::$pdo = new PDO("mysql:host=$h;dbname=$d", $l, $p, $t);
-            self::$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            self::$pdo = new PDO(
+                "mysql:host=" . HOSTNAME . ";dbname=" . DATABASE . ";charset=utf8mb4",
+                LOGIN,
+                PASSWORD,
+                [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                    PDO::ATTR_EMULATE_PREPARES => false
+                ]
+            );
         } catch (PDOException $e) {
-            echo "Erreur de connexion : " . $e->getMessage() . "<br>";
+            die("Erreur de connexion à la base de données : " . $e->getMessage());
         }
     }
 }
-?>
